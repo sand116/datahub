@@ -1,8 +1,11 @@
 import { aliasQuery, hasOperationName } from "../utils";
 
-const test_domain_id = Math.floor(Math.random() * 100000);
-const test_domain = `CypressDomainTest ${test_domain_id}`;
-const test_domain_urn = `urn:li:domain:${test_domain_id}`;
+const CUSTOMERS_DATASET_NAME = "customers";
+const CUSTOMERS_DATASET_URN =
+  "urn:li:dataset:(urn:li:dataPlatform:bigquery,cypress_project.jaffle_shop.customers,PROD)";
+const CUSTOMERS_DATASET_SEARCH = "cypress_project.jaffle_shop.customers";
+const CUSTOMERS_CONTAINER_URN =
+  "urn:li:container:348c96555971d3f5c1ffd7dd2e7446cb";
 
 describe("add remove domain", () => {
   beforeEach(() => {
@@ -23,60 +26,106 @@ describe("add remove domain", () => {
     });
   };
 
-  it("create domain", () => {
+  const createDomain = () => {
+    const domainId = `cypressdomaintest${Date.now()}${Cypress._.random(1000, 9999)}`;
+    const domainName = `CypressDomainTest ${domainId}`;
+    const domainUrn = `urn:li:domain:${domainId}`;
+
     setDomainsFeatureFlag(true);
     cy.login();
     cy.goToDomainList();
     cy.clickOptionWithTestId("domains-new-domain-button");
     cy.waitTextVisible("Create New Domain");
-    cy.get('[data-testid="create-domain-name"]').click().type(test_domain);
+    cy.get('[data-testid="create-domain-name"]').click().type(domainName);
     cy.clickOptionWithText("Advanced");
-    cy.get('[data-testid="create-domain-id"]').click().type(test_domain_id);
-    cy.get('[data-testid="create-domain-button"]').click();
-    cy.waitTextVisible(test_domain);
+    cy.get('[data-testid="create-domain-id"]').click().type(domainId);
+    cy.get('[data-testid="create-domain-button"]', { timeout: 10000 })
+      .should("be.enabled")
+      .click();
+    cy.waitTextVisible(domainName);
+
+    return {
+      domainName,
+      domainUrn,
+    };
+  };
+
+  const openDomain = (domainUrn, domainName) => {
+    setDomainsFeatureFlag(true);
+    cy.goToDomain(domainUrn);
+    cy.waitTextVisible(domainName);
+    cy.get('[data-testid="domain-batch-add"]', { timeout: 30000 }).should(
+      "be.visible",
+    );
+  };
+
+  const addCustomersToDomain = () => {
+    cy.clickOptionWithTestId("domain-batch-add");
+    cy.get('[data-testid="search-select-modal"]', { timeout: 30000 }).should(
+      "be.visible",
+    );
+    cy.get('[data-testid="search-input"]')
+      .filter(":visible")
+      .first()
+      .click()
+      .clear()
+      .type(CUSTOMERS_DATASET_SEARCH, { delay: 0 });
+    cy.get(`[data-testid="checkbox-${CUSTOMERS_DATASET_URN}"]`, {
+      timeout: 30000,
+    })
+      .should("be.visible")
+      .click({ force: true });
+    cy.get('[data-testid="search-select-modal-continue-button"]', {
+      timeout: 10000,
+    })
+      .should("not.be.disabled")
+      .click();
+    cy.waitTextVisible("Added assets to Domain!");
+  };
+
+  const deleteDomain = () => {
+    cy.deleteFromDropdown();
+    cy.waitTextVisible("Deleted Domain!");
+  };
+
+  it("create domain", () => {
+    createDomain();
   });
 
   it("add entities to domain", () => {
-    setDomainsFeatureFlag(false);
-    cy.login();
-    cy.goToDomainList();
-    cy.clickOptionWithText(test_domain);
-    cy.clickOptionWithTestId("domain-batch-add");
-    cy.get(".ant-modal-content").within(() => {
-      cy.get('[data-testid="search-input"]')
-        .click()
-        .type("cypress_project.jaffle_shop.customers");
-      cy.contains("customers", { timeout: 30000 });
-      cy.clickOptionWithTestId(
-        "checkbox-urn:li:dataset:(urn:li:dataPlatform:bigquery,cypress_project.jaffle_shop.customers,PROD)",
-        { timeout: 30000 },
-      );
-      cy.get("#continueButton").click();
-    });
-    cy.waitTextVisible("Added assets to Domain!");
+    const { domainName, domainUrn } = createDomain();
+
+    openDomain(domainUrn, domainName);
+    addCustomersToDomain();
   });
 
   it("remove entity from domain", () => {
-    setDomainsFeatureFlag(false);
-    cy.login();
-    cy.goToDomainList();
+    const { domainName, domainUrn } = createDomain();
+
+    openDomain(domainUrn, domainName);
+    addCustomersToDomain();
     cy.removeDomainFromDataset(
-      "urn:li:dataset:(urn:li:dataPlatform:bigquery,cypress_project.jaffle_shop.customers,PROD)",
-      "customers",
-      test_domain_urn,
+      CUSTOMERS_DATASET_URN,
+      CUSTOMERS_DATASET_NAME,
+      domainUrn,
     );
+    openDomain(domainUrn, domainName);
+    deleteDomain();
   });
 
   it("delete a domain and ensure dangling reference is deleted on entities", () => {
-    setDomainsFeatureFlag(false);
-    cy.login();
-    cy.goToDomainList();
-    cy.get(`[data-testid="dropdown-menu-${test_domain_urn}"]`).click();
-    cy.clickOptionWithText("Delete");
-    cy.clickOptionWithText("Yes");
-    cy.ensureTextNotPresent(test_domain);
-    cy.goToContainer("urn:li:container:348c96555971d3f5c1ffd7dd2e7446cb");
-    cy.waitTextVisible("customers");
-    cy.ensureTextNotPresent(test_domain);
+    const { domainName, domainUrn } = createDomain();
+
+    openDomain(domainUrn, domainName);
+    addCustomersToDomain();
+    cy.goToDataset(CUSTOMERS_DATASET_URN, CUSTOMERS_DATASET_NAME);
+    cy.get(`.sidebar-domain-section [href="/domain/${domainUrn}"]`, {
+      timeout: 30000,
+    }).should("be.visible");
+    openDomain(domainUrn, domainName);
+    deleteDomain();
+    cy.goToContainer(CUSTOMERS_CONTAINER_URN);
+    cy.waitTextVisible(CUSTOMERS_DATASET_NAME);
+    cy.ensureTextNotPresent(domainName);
   });
 });
